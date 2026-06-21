@@ -1,0 +1,135 @@
+"""
+MIL-enabled launcher for the C4 Reader and Converter to PDF dashboard.
+
+This wrapper keeps the original c4_pdf_dashboard.py release code intact and adds
+support for JEDMICS .MIL files that contain the same C4/CCITT4 tiled raster data.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from tkinter import filedialog, messagebox
+import traceback
+
+import c4_pdf_dashboard as app
+
+C4_MIL_EXTENSIONS = {".c4", ".mil"}
+
+app.APP_TITLE = "C4/MIL Reader and Converter to PDF"
+app.SUPPORTED_EXTENSIONS.add(".mil")
+
+_original_load_file = app.load_file
+_original_convert_file_to_pdf = app.convert_file_to_pdf
+_original_dashboard_init = app.Dashboard.__init__
+
+
+def _is_c4_or_mil(path: Path) -> bool:
+    return path.suffix.lower() in C4_MIL_EXTENSIONS
+
+
+def load_file(path: Path, dpi_fallback: int = app.DEFAULT_DPI) -> app.LoadedFile:
+    if _is_c4_or_mil(path):
+        image, info, dpi = app.decode_c4(path, dpi_fallback)
+        if path.suffix.lower() == ".mil":
+            info = info.replace("C4/JEDMICS raster drawing", "JEDMICS MIL raster drawing")
+        return app.LoadedFile(path, image, dpi, info)
+    return _original_load_file(path, dpi_fallback)
+
+
+def convert_file_to_pdf(path: Path, out_path: Path, dpi_fallback: int = app.DEFAULT_DPI) -> tuple[bool, str]:
+    try:
+        loaded = load_file(path, dpi_fallback)
+        if loaded.image is None:
+            return False, "No image data available for conversion."
+        dpi = (dpi_fallback, dpi_fallback) if _is_c4_or_mil(path) else loaded.dpi
+        app.save_image_as_pdf(loaded.image, out_path, dpi)
+        return True, str(out_path)
+    except Exception as exc:
+        return False, str(exc)
+
+
+def dashboard_init(self: app.Dashboard) -> None:
+    _original_dashboard_init(self)
+    self.title(app.APP_TITLE)
+    try:
+        self.status_var.set("Select a C4, MIL, or image file.")
+    except Exception:
+        pass
+
+
+def select_file(self: app.Dashboard) -> None:
+    filetypes = [
+        ("Supported files", "*.c4 *.C4 *.mil *.MIL *.tif *.tiff *.png *.jpg *.jpeg *.bmp *.gif *.webp *.pbm *.pgm *.ppm *.pdf"),
+        ("C4/MIL drawings", "*.c4 *.C4 *.mil *.MIL"),
+        ("Images", "*.tif *.tiff *.png *.jpg *.jpeg *.bmp *.gif *.webp *.pbm *.pgm *.ppm"),
+        ("PDF", "*.pdf"),
+        ("All files", "*.*"),
+    ]
+    selected = filedialog.askopenfilename(title="Select file", filetypes=filetypes)
+    if selected:
+        self.load_selected(Path(selected))
+
+
+def load_selected(self: app.Dashboard, path: Path) -> None:
+    try:
+        loaded = load_file(path, int(self.dpi_var.get()))
+    except Exception as exc:
+        self.status_var.set("Load failed.")
+        messagebox.showerror("Load failed", f"Could not load file:\n{path}\n\n{exc}\n\n{traceback.format_exc()}")
+        return
+
+    self.loaded = loaded
+    self.preview_base = loaded.image.copy() if loaded.image is not None else None
+    self.set_details(f"File:\n{path}\n\n{loaded.info}\n")
+    if self.preview_base is None:
+        self.canvas.delete("all")
+        self.canvas.create_text(20, 20, text=loaded.info, fill="white", anchor="nw", font=("Segoe UI", 13), width=700)
+        self.status_var.set(f"Loaded {path.name}; no internal preview available.")
+    else:
+        self.fit_preview()
+        self.status_var.set(f"Loaded {path.name}; ready to save as PDF.")
+
+
+def save_pdf(self: app.Dashboard) -> None:
+    if self.loaded is None:
+        messagebox.showinfo("No file selected", "Select a file first.")
+        return
+    default_name = self.loaded.path.stem + ".pdf"
+    out = filedialog.asksaveasfilename(
+        title="Save PDF",
+        defaultextension=".pdf",
+        initialfile=default_name,
+        filetypes=[("PDF files", "*.pdf")],
+    )
+    if not out:
+        return
+    out_path = Path(out)
+    try:
+        if self.loaded.path.suffix.lower() == ".pdf" and self.loaded.image is None:
+            out_path.write_bytes(self.loaded.path.read_bytes())
+        elif self.loaded.image is not None:
+            dpi = self.loaded.dpi
+            if _is_c4_or_mil(self.loaded.path):
+                dpi = (int(self.dpi_var.get()), int(self.dpi_var.get()))
+            app.save_image_as_pdf(self.loaded.image, out_path, dpi)
+        else:
+            raise RuntimeError("No image data is available to export.")
+    except Exception as exc:
+        self.status_var.set("Save failed.")
+        messagebox.showerror("Save failed", f"Could not save PDF:\n{out_path}\n\n{exc}\n\n{traceback.format_exc()}")
+        return
+    self.status_var.set(f"Saved PDF: {out_path}")
+    if self.open_after_save.get():
+        app.open_default(out_path)
+
+
+app.load_file = load_file
+app.convert_file_to_pdf = convert_file_to_pdf
+app.Dashboard.__init__ = dashboard_init
+app.Dashboard.select_file = select_file
+app.Dashboard.load_selected = load_selected
+app.Dashboard.save_pdf = save_pdf
+
+
+if __name__ == "__main__":
+    app.main()

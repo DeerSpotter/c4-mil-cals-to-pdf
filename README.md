@@ -30,6 +30,8 @@ Online converter features:
 
 The local dashboard is the full desktop version. Use this when you want folder batch conversion, recursive subfolder scanning, or a Windows desktop preview workflow.
 
+The launcher uses `c4_pdf_dashboard_mil.py`, which keeps the original `c4_pdf_dashboard.py` release code intact and adds `.MIL` support for JEDMICS CCITT4 files saved with a MIL extension.
+
 ## Features
 
 - Select a single C4/MIL drawing or normal image file.
@@ -70,7 +72,7 @@ py -m pip install pymupdf
 ## Run
 
 ```bat
-py c4_pdf_dashboard.py
+py c4_pdf_dashboard_mil.py
 ```
 
 Or double click:

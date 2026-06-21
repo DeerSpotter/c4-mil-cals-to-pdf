@@ -13,13 +13,13 @@ The online converter is up and running here:
 
 [https://deerspotter.github.io/C4-Reader-and-Converter-to-pdf/](https://deerspotter.github.io/C4-Reader-and-Converter-to-pdf/)
 
-Use this when you only need to convert one `.C4` file at a time.
+Use this when you only need to convert one `.C4` or `.MIL` file at a time.
 
 The browser version runs locally in your browser. The selected file is not uploaded to a server. It reads the C4/JEDMICS tile data, builds a PDF in the browser, and lets you open or download the generated PDF.
 
 Online converter features:
 
-- Select or drag and drop one `.C4` file.
+- Select or drag and drop one `.C4` or `.MIL` file.
 - Preview the generated PDF in the browser.
 - Change DPI before exporting.
 - Open the generated PDF in a new tab.
@@ -32,7 +32,7 @@ The local dashboard is the full desktop version. Use this when you want folder b
 
 ## Features
 
-- Select a single C4 drawing or normal image file.
+- Select a single C4/MIL drawing or normal image file.
 - Preview the decoded drawing on the right side with scroll and zoom.
 - Save the selected drawing as a PDF.
 - Batch convert a whole directory tree.
@@ -44,6 +44,7 @@ The local dashboard is the full desktop version. Use this when you want folder b
 Direct conversion:
 
 - `.C4` / `.c4` JEDMICS tiled CCITT Group 4 drawings
+- `.MIL` / `.mil` JEDMICS CCITT4 drawings saved with a MIL extension
 - `.tif` / `.tiff`
 - `.png`
 - `.jpg` / `.jpeg`
@@ -88,9 +89,9 @@ run_c4_pdf_dashboard.bat
 
 To replace existing PDFs, check **Overwrite PDFs in batch** before starting batch conversion.
 
-## C4 decoding notes
+## C4/MIL decoding notes
 
-This tool decodes the common JEDMICS/C4 layout used by tiled black and white engineering raster drawings:
+This tool decodes the common JEDMICS/C4 layout used by tiled black and white engineering raster drawings. Some JEDMICS exports store the same C4/CCITT4 data with a `.MIL` extension, so this tool treats `.C4` and `.MIL` as the same drawing data layout.
 
 - 512 x 512 tiles
 - CCITT Group 4 compression

@@ -9,26 +9,38 @@
 <body>
   <main class="shell">
     <section class="panel controls">
-      <div class="eyebrow">GitHub Pages one-file converter</div>
+      <div class="eyebrow">GitHub Pages converter</div>
       <h1>C4/MIL Reader and Converter to PDF</h1>
       <p class="lede">
         Select one legacy C4/JEDMICS drawing or MIL file containing C4/CCITT4 data,
-        preview the generated PDF, then download it. The file is processed locally in
-        your browser and is not uploaded.
+        preview the generated PDF, then download it. Or select a folder to batch convert
+        all C4/MIL files found in that folder and its subfolders. Files are processed
+        locally in your browser and are not uploaded.
       </p>
 
       <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="Select or drop a C4 or MIL file">
-        <strong>Drop .C4 or .MIL file here</strong>
+        <strong>Drop one .C4 or .MIL file here</strong>
         <span>or use the file picker</span>
       </div>
 
       <input id="fileInput" class="hidden" type="file" accept=".c4,.C4,.mil,.MIL">
+      <input id="folderInput" class="hidden" type="file" webkitdirectory directory multiple>
 
       <div class="row">
         <button id="chooseButton" type="button">Choose C4/MIL file</button>
         <button id="downloadButton" type="button" disabled>Download PDF</button>
         <button id="openButton" type="button" disabled>Open PDF</button>
       </div>
+
+      <div class="row batch-row">
+        <button id="folderButton" type="button">Choose folder and download ZIP</button>
+      </div>
+
+      <p class="batch-help">
+        Folder mode scans subfolders for .C4 and .MIL files, converts them locally, and
+        downloads one ZIP containing the generated PDFs plus a conversion report. Browsers
+        do not allow this page to write PDFs directly back into your original folders.
+      </p>
 
       <label class="dpi-label" for="dpiInput">
         Drawing DPI
@@ -41,9 +53,9 @@
       <section class="notes">
         <h2>What this page version does</h2>
         <p>
-          This browser version is intentionally limited to one .C4 or .MIL file at a time.
-          The desktop Python release remains the full tool for directory batch conversion
-          and image format conversion.
+          The browser version can convert one file for preview/download, or batch convert a
+          selected folder tree into one ZIP download. The desktop Python release remains the
+          full tool for writing converted PDFs beside source files in local folders.
         </p>
         <p>
           The generated PDF embeds the original CCITT Group 4 tiles directly, so the page
@@ -64,5 +76,6 @@
   <script>window.module = window.module || { exports: {} };</script>
   <script src="app.js"></script>
   <script src="mil-support.js"></script>
+  <script src="batch-folder.js"></script>
 </body>
 </html>

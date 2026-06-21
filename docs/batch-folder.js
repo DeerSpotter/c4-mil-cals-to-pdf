@@ -1,13 +1,14 @@
 /*
-  Browser folder batch conversion for C4/MIL files.
+  Browser folder and multi-file batch conversion for C4/MIL files.
 
   The browser cannot silently write PDFs back into the selected source folders.
   Instead this scans the selected directory tree locally, converts supported files,
-  preserves relative paths inside a ZIP archive, and downloads that ZIP.
+  and either downloads a ZIP of individual PDFs or one combined multi-page PDF.
 */
 
 (() => {
   const DEFAULT_DPI = 200;
+  const TILE_SIZE = 512;
   const SUPPORTED_EXTENSIONS = [".c4", ".mil"];
 
   function getExportedConverter() {
@@ -31,6 +32,11 @@
       return DEFAULT_DPI;
     }
     return value;
+  }
+
+  function shouldCombineIntoOnePdf() {
+    const checkbox = document.getElementById("combinePdfCheckbox");
+    return Boolean(checkbox && checkbox.checked);
   }
 
   function setStatus(message, isError = false) {
@@ -69,9 +75,36 @@
     return parts.slice(1).join("/");
   }
 
+  function relativePathForFile(file) {
+    return file.webkitRelativePath ? stripTopFolder(file.webkitRelativePath) : file.name;
+  }
+
   function pdfPathForFile(file) {
-    const relativePath = file.webkitRelativePath ? stripTopFolder(file.webkitRelativePath) : file.name;
-    return relativePath.replace(/\.[^/.]+$/, ".pdf");
+    return relativePathForFile(file).replace(/\.[^/.]+$/, ".pdf");
+  }
+
+  function makeUniquePath(path, usedPaths) {
+    const normalized = path.replace(/\\/g, "/");
+    if (!usedPaths.has(normalized)) {
+      usedPaths.add(normalized);
+      return normalized;
+    }
+
+    const dot = normalized.lastIndexOf(".");
+    const slash = normalized.lastIndexOf("/");
+    const hasExtension = dot > slash;
+    const stem = hasExtension ? normalized.slice(0, dot) : normalized;
+    const extension = hasExtension ? normalized.slice(dot) : "";
+
+    let counter = 2;
+    while (true) {
+      const candidate = `${stem}_${counter}${extension}`;
+      if (!usedPaths.has(candidate)) {
+        usedPaths.add(candidate);
+        return candidate;
+      }
+      counter++;
+    }
   }
 
   const crcTable = (() => {
@@ -108,6 +141,10 @@
   }
 
   function utf8(text) {
+    return new TextEncoder().encode(text);
+  }
+
+  function ascii(text) {
     return new TextEncoder().encode(text);
   }
 
@@ -196,35 +233,143 @@
     return concat([...localChunks, centralDirectory, new Uint8Array(end)]);
   }
 
-  async function convertFolderFiles(fileList) {
-    const files = Array.from(fileList || []);
-    const supported = files.filter(isSupportedFile).sort((a, b) => {
-      const ap = a.webkitRelativePath || a.name;
-      const bp = b.webkitRelativePath || b.name;
-      return ap.localeCompare(bp);
-    });
+  function makeImageObject(tile) {
+    const tileData = tile.data;
 
-    if (!supported.length) {
-      setStatus("No .C4 or .MIL files were found in that folder.", true);
-      setDetails(`Scanned ${files.length.toLocaleString()} file(s), but found no supported C4/MIL drawings.`);
-      return;
+    if (tile.compression === 0x00) {
+      return concat([
+        ascii(
+          `<< /Type /XObject /Subtype /Image /Width ${TILE_SIZE} /Height ${TILE_SIZE} ` +
+            `/ColorSpace /DeviceGray /BitsPerComponent 1 ` +
+            `/Filter /CCITTFaxDecode ` +
+            `/DecodeParms << /K -1 /Columns ${TILE_SIZE} /Rows ${TILE_SIZE} /BlackIs1 false >> ` +
+            `/Length ${tileData.length} >>\nstream\n`
+        ),
+        tileData,
+        ascii("\nendstream"),
+      ]);
     }
 
-    const { parseC4, buildPdfFromC4 } = getExportedConverter();
-    const dpi = getDpi();
+    if (tile.compression === 0x80) {
+      return concat([
+        ascii(
+          `<< /Type /XObject /Subtype /Image /Width ${TILE_SIZE} /Height ${TILE_SIZE} ` +
+            `/ColorSpace /DeviceGray /BitsPerComponent 1 ` +
+            `/Length ${tileData.length} >>\nstream\n`
+        ),
+        tileData,
+        ascii("\nendstream"),
+      ]);
+    }
+
+    throw new Error(
+      `Unsupported C4 tile compression flag at tile ${tile.entryNo}: 0x${tile.compression
+        .toString(16)
+        .padStart(2, "0")}.`
+    );
+  }
+
+  function buildCombinedPdfFromParsedDocs(docs, dpi = DEFAULT_DPI) {
+    if (!docs.length) throw new Error("No converted drawings are available to combine.");
+
+    const cleanDpi = Number.isFinite(dpi) && dpi > 0 ? dpi : DEFAULT_DPI;
+    const objects = new Map();
+    const pageIds = [];
+    let nextObjectId = 3;
+
+    for (const doc of docs) {
+      const parsed = doc.parsed;
+      const pageWidthPt = (parsed.width / cleanDpi) * 72;
+      const pageHeightPt = (parsed.height / cleanDpi) * 72;
+      const tileWidthPt = (TILE_SIZE / cleanDpi) * 72;
+      const tileHeightPt = (TILE_SIZE / cleanDpi) * 72;
+
+      const imageRefs = [];
+      const sortedTiles = [...parsed.tiles].sort((a, b) => a.logicalTile - b.logicalTile);
+      for (const tile of sortedTiles) {
+        const objectId = nextObjectId++;
+        objects.set(objectId, makeImageObject(tile));
+        imageRefs.push({ objectId, logicalTile: tile.logicalTile });
+      }
+
+      let content = "";
+      for (const ref of imageRefs) {
+        const col = ref.logicalTile % parsed.cols;
+        const row = Math.floor(ref.logicalTile / parsed.cols);
+        const x = col * tileWidthPt;
+        const y = pageHeightPt - (row + 1) * tileHeightPt;
+        content +=
+          "q\n" +
+          `${tileWidthPt.toFixed(6)} 0 0 ${tileHeightPt.toFixed(6)} ${x.toFixed(6)} ${y.toFixed(6)} cm\n` +
+          `/Im${ref.objectId} Do\n` +
+          "Q\n";
+      }
+
+      const contentBytes = ascii(content);
+      const contentObjectId = nextObjectId++;
+      objects.set(
+        contentObjectId,
+        concat([
+          ascii(`<< /Length ${contentBytes.length} >>\nstream\n`),
+          contentBytes,
+          ascii("endstream"),
+        ])
+      );
+
+      const xobjects = imageRefs.map((ref) => `/Im${ref.objectId} ${ref.objectId} 0 R`).join(" ");
+      const pageObjectId = nextObjectId++;
+      objects.set(
+        pageObjectId,
+        ascii(
+          `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidthPt.toFixed(6)} ${pageHeightPt.toFixed(
+            6
+          )}] /Resources << /XObject << ${xobjects} >> >> /Contents ${contentObjectId} 0 R >>`
+        )
+      );
+      pageIds.push(pageObjectId);
+    }
+
+    objects.set(2, ascii(`<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`));
+    objects.set(1, ascii("<< /Type /Catalog /Pages 2 0 R >>"));
+
+    const maxObjectId = Math.max(...objects.keys());
+    const chunks = [ascii("%PDF-1.4\n% C4/MIL combined PDF generated by GitHub Pages\n")];
+    const offsets = new Array(maxObjectId + 1).fill(0);
+    let lengthSoFar = chunks[0].length;
+
+    for (let objectId = 1; objectId <= maxObjectId; objectId++) {
+      const body = objects.get(objectId);
+      if (!body) throw new Error(`Internal combined PDF build error: missing object ${objectId}.`);
+      offsets[objectId] = lengthSoFar;
+      const prefix = ascii(`${objectId} 0 obj\n`);
+      const suffix = ascii("\nendobj\n");
+      chunks.push(prefix, body, suffix);
+      lengthSoFar += prefix.length + body.length + suffix.length;
+    }
+
+    const startXref = lengthSoFar;
+    let xref = `xref\n0 ${maxObjectId + 1}\n0000000000 65535 f \n`;
+    for (let objectId = 1; objectId <= maxObjectId; objectId++) {
+      xref += `${String(offsets[objectId]).padStart(10, "0")} 00000 n \n`;
+    }
+    xref += `trailer\n<< /Size ${maxObjectId + 1} /Root 1 0 R >>\nstartxref\n${startXref}\n%%EOF\n`;
+    chunks.push(ascii(xref));
+
+    return concat(chunks);
+  }
+
+  async function collectConvertedDocs(supported, parseC4, buildPdfFromC4, dpi) {
     const zipEntries = [];
+    const combinedDocs = [];
     const report = [];
+    const usedOutputPaths = new Set();
     let converted = 0;
     let failed = 0;
-
-    setStatus(`Found ${supported.length.toLocaleString()} C4/MIL file(s). Converting...`);
-    setDetails("");
-    await waitForPaint();
 
     for (let i = 0; i < supported.length; i++) {
       const file = supported[i];
       const inputPath = file.webkitRelativePath || file.name;
-      const outputPath = pdfPathForFile(file);
+      const outputPath = makeUniquePath(pdfPathForFile(file), usedOutputPaths);
       setStatus(`Converting ${i + 1} of ${supported.length}: ${inputPath}`);
 
       try {
@@ -232,6 +377,7 @@
         const parsed = parseC4(buffer);
         const pdfBytes = buildPdfFromC4(parsed, dpi);
         zipEntries.push({ path: outputPath, data: pdfBytes });
+        combinedDocs.push({ path: inputPath, outputPath, parsed });
         converted++;
         report.push(`OK   ${inputPath} -> ${outputPath} (${parsed.width} x ${parsed.height}, ${parsed.tileCount} tiles)`);
       } catch (error) {
@@ -246,51 +392,117 @@
       }
     }
 
-    report.unshift(
-      "C4/MIL folder batch conversion report",
+    return { zipEntries, combinedDocs, report, converted, failed };
+  }
+
+  function buildReportHeader(mode, files, supported, converted, failed, dpi) {
+    return [
+      `C4/MIL ${mode} conversion report`,
       `Generated: ${new Date().toLocaleString()}`,
       `DPI: ${dpi}`,
       `Scanned files: ${files.length}`,
       `Supported C4/MIL files: ${supported.length}`,
       `Converted: ${converted}`,
       `Failed: ${failed}`,
-      ""
-    );
-    zipEntries.push({ path: "conversion_report.txt", data: utf8(report.join("\n")) });
+      "",
+    ];
+  }
 
-    if (!converted) {
-      setStatus("No PDFs were created. See the conversion report below.", true);
-      setDetails(report.join("\n"));
+  async function convertBatchFiles(fileList, sourceLabel) {
+    const files = Array.from(fileList || []);
+    const supported = files.filter(isSupportedFile).sort((a, b) => {
+      const ap = a.webkitRelativePath || a.name;
+      const bp = b.webkitRelativePath || b.name;
+      return ap.localeCompare(bp);
+    });
+
+    if (!supported.length) {
+      setStatus(`No .C4 or .MIL files were found in the selected ${sourceLabel}.`, true);
+      setDetails(`Scanned ${files.length.toLocaleString()} file(s), but found no supported C4/MIL drawings.`);
       return;
     }
 
+    const { parseC4, buildPdfFromC4 } = getExportedConverter();
+    const dpi = getDpi();
+    const combine = shouldCombineIntoOnePdf();
+
+    setStatus(
+      `Found ${supported.length.toLocaleString()} C4/MIL file(s). Converting${combine ? " into one PDF" : ""}...`
+    );
+    setDetails("");
+    await waitForPaint();
+
+    const result = await collectConvertedDocs(supported, parseC4, buildPdfFromC4, dpi);
+    const reportHeader = buildReportHeader(
+      combine ? "combined PDF" : "folder/file batch",
+      files,
+      supported,
+      result.converted,
+      result.failed,
+      dpi
+    );
+    const fullReport = [...reportHeader, ...result.report];
+
+    if (!result.converted) {
+      setStatus("No PDFs were created. See the conversion report below.", true);
+      setDetails(fullReport.join("\n"));
+      return;
+    }
+
+    if (combine) {
+      setStatus("Building combined PDF download...");
+      await waitForPaint();
+      const combinedPdfBytes = buildCombinedPdfFromParsedDocs(result.combinedDocs, dpi);
+      downloadBytes(combinedPdfBytes, "c4-mil-combined.pdf", "application/pdf");
+      setStatus(
+        `Combined PDF complete. Added ${result.converted} page(s)${result.failed ? `, ${result.failed} failed` : ""}. Download started.`
+      );
+      setDetails([
+        ...fullReport,
+        "",
+        "Combined PDF page order:",
+        ...result.combinedDocs.map((doc, index) => `${index + 1}. ${doc.path}`),
+      ].join("\n"));
+      return;
+    }
+
+    const zipEntries = [...result.zipEntries, { path: "conversion_report.txt", data: utf8(fullReport.join("\n")) }];
     setStatus("Building ZIP download...");
     await waitForPaint();
     const zipBytes = makeZip(zipEntries);
     downloadBytes(zipBytes, "c4-mil-converted-pdfs.zip", "application/zip");
 
-    setStatus(`Batch complete. Converted ${converted} file(s)${failed ? `, ${failed} failed` : ""}. ZIP download started.`);
-    setDetails(report.join("\n"));
+    setStatus(`Batch complete. Converted ${result.converted} file(s)${result.failed ? `, ${result.failed} failed` : ""}. ZIP download started.`);
+    setDetails(fullReport.join("\n"));
   }
 
-  function setupFolderBatch() {
+  function setupBatchInputs() {
     const folderInput = document.getElementById("folderInput");
     const folderButton = document.getElementById("folderButton");
-    if (!folderInput || !folderButton) return;
+    const multiFileInput = document.getElementById("multiFileInput");
+    const filesButton = document.getElementById("filesButton");
 
-    if (!("webkitdirectory" in folderInput)) {
-      folderButton.disabled = true;
-      folderButton.title = "This browser does not expose folder selection to web pages.";
-      return;
+    if (folderInput && folderButton) {
+      if (!("webkitdirectory" in folderInput)) {
+        folderButton.disabled = true;
+        folderButton.title = "This browser does not expose recursive folder selection to web pages. Use Choose C4/MIL files instead.";
+      } else {
+        folderButton.addEventListener("click", () => {
+          folderInput.value = "";
+          folderInput.click();
+        });
+        folderInput.addEventListener("change", () => convertBatchFiles(folderInput.files, "folder"));
+      }
     }
 
-    folderButton.addEventListener("click", () => {
-      folderInput.value = "";
-      folderInput.click();
-    });
-
-    folderInput.addEventListener("change", () => convertFolderFiles(folderInput.files));
+    if (multiFileInput && filesButton) {
+      filesButton.addEventListener("click", () => {
+        multiFileInput.value = "";
+        multiFileInput.click();
+      });
+      multiFileInput.addEventListener("change", () => convertBatchFiles(multiFileInput.files, "file list"));
+    }
   }
 
-  document.addEventListener("DOMContentLoaded", setupFolderBatch);
+  document.addEventListener("DOMContentLoaded", setupBatchInputs);
 })();

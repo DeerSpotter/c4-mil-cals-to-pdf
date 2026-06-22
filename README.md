@@ -4,7 +4,7 @@ Convert legacy C4/JEDMICS engineering raster drawings to PDF.
 
 This project now has two ways to use it:
 
-1. **Online converter** through GitHub Pages for one-file conversion, browser folder/file batch conversion, ZIP download, or combined multi-page PDF output.
+1. **Online converter** through GitHub Pages for one-file conversion, browser folder/file batch conversion, ZIP download, direct folder save on supported desktop browsers, or combined multi-page PDF output.
 2. **Local Windows Python dashboard** for previewing, saving, and batch converting folders directly beside source files.
 
 ## Online converter
@@ -15,7 +15,7 @@ The online converter is up and running here:
 
 Use this when you need a no-install browser converter for `.C4` or `.MIL` files.
 
-The browser version runs locally in your browser. Selected files are not uploaded to a server. It reads the C4/JEDMICS tile data, builds PDF files in the browser, and lets you open/download a single generated PDF, download a ZIP from batch conversion, or combine batch output into one multi-page PDF.
+The browser version runs locally in your browser. Selected files are not uploaded to a server. It reads the C4/JEDMICS tile data, builds PDF files in the browser, and lets you open/download a single generated PDF, download a ZIP from batch conversion, save a batch ZIP or combined PDF back into a selected folder when the browser supports folder write permission, or combine batch output into one multi-page PDF.
 
 Online converter features:
 
@@ -27,10 +27,11 @@ Online converter features:
 - Select a folder and scan subfolders for `.C4` and `.MIL` files when the browser supports recursive folder selection.
 - Select multiple `.C4` and `.MIL` files manually when folder selection is not available, such as on some iOS browsers.
 - Download browser batch converted PDFs as one ZIP file with a conversion report.
-- Check **Combine batch output into one multi-page PDF** to download one combined PDF instead of a ZIP.
+- Use **Choose folder and save output there** on supported desktop browsers to write `c4-mil-converted-pdfs.zip` directly into the selected source folder.
+- Check **Combine batch output into one multi-page PDF** to download one combined PDF instead of a ZIP, or to save `c4-mil-combined.pdf` into the selected folder when using the direct folder save button.
 - No Python install required.
 
-Browser folder batch note: web pages cannot silently write generated PDFs back into your original local folders, so the GitHub Pages version preserves the folder structure inside a downloadable ZIP. Use the Python dashboard when you need PDFs written beside the source files.
+Browser folder batch note: normal web file pickers cannot silently write generated PDFs back into your original local folders. The direct save button uses browser folder write permission when available, usually in desktop Chromium based browsers. iOS Safari generally does not expose this direct folder write workflow, so use normal download or the Python dashboard when you need guaranteed local folder output.
 
 ## Local Python dashboard
 

@@ -1,8 +1,6 @@
 /* ZIP and WinZip self extracting EXE support. EXE files are read as archives only and are never executed. */
 (() => {
   const DEFAULT_DPI = 200;
-  const TILE_SIZE = 512;
-  const DRAWING_EXTENSIONS = [".c4", ".mil"];
   const PACKAGE_EXTENSIONS = [".exe", ".zip"];
   const decoder = new TextDecoder("utf-8");
   const encoder = new TextEncoder();
@@ -11,8 +9,8 @@
 
   function getExportedConverter() {
     const exported = window.module && window.module.exports ? window.module.exports : {};
-    if (typeof exported.parseC4 !== "function" || typeof exported.buildPdfFromC4 !== "function") {
-      throw new ZipPackageError("Could not find the C4 parser exported by app.js.");
+    if (typeof exported.convertDrawingArrayBuffer !== "function" || typeof exported.buildCombinedPdfFromParsedDocs !== "function") {
+      throw new ZipPackageError("Could not find the drawing converter exported by app.js/cals-support.js.");
     }
     return exported;
   }
@@ -27,10 +25,7 @@
     for (const chunk of chunks) size += chunk.length;
     const out = new Uint8Array(size);
     let offset = 0;
-    for (const chunk of chunks) {
-      out.set(chunk, offset);
-      offset += chunk.length;
-    }
+    for (const chunk of chunks) { out.set(chunk, offset); offset += chunk.length; }
     return out;
   }
 
@@ -40,9 +35,7 @@
     status.classList.toggle("error", isError);
   }
 
-  function setDetails(message) {
-    document.getElementById("details").textContent = message;
-  }
+  function setDetails(message) { document.getElementById("details").textContent = message; }
 
   function getDpi() {
     const input = document.getElementById("dpiInput");
@@ -62,11 +55,6 @@
   function isPackageFile(file) {
     const name = (file && file.name ? file.name : "").toLowerCase();
     return PACKAGE_EXTENSIONS.some((ext) => name.endsWith(ext));
-  }
-
-  function isDrawingPath(path) {
-    const lower = String(path || "").toLowerCase();
-    return DRAWING_EXTENSIONS.some((ext) => lower.endsWith(ext));
   }
 
   function sigAt(bytes, offset, sig) {
@@ -101,10 +89,7 @@
 
   function makeUniquePath(path, used) {
     const normalized = cleanPath(path);
-    if (!used.has(normalized)) {
-      used.add(normalized);
-      return normalized;
-    }
+    if (!used.has(normalized)) { used.add(normalized); return normalized; }
     const slash = normalized.lastIndexOf("/");
     const dot = normalized.lastIndexOf(".");
     const stem = dot > slash ? normalized.slice(0, dot) : normalized;
@@ -112,10 +97,7 @@
     let counter = 2;
     while (true) {
       const candidate = `${stem}_${counter}${ext}`;
-      if (!used.has(candidate)) {
-        used.add(candidate);
-        return candidate;
-      }
+      if (!used.has(candidate)) { used.add(candidate); return candidate; }
       counter++;
     }
   }
@@ -240,81 +222,6 @@
     return concat([...localChunks, centralDirectory, new Uint8Array(end)]);
   }
 
-  function makeImageObject(tile) {
-    const tileData = tile.data;
-    if (tile.compression === 0x00) {
-      return concat([
-        utf8(`<< /Type /XObject /Subtype /Image /Width ${TILE_SIZE} /Height ${TILE_SIZE} /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /CCITTFaxDecode /DecodeParms << /K -1 /Columns ${TILE_SIZE} /Rows ${TILE_SIZE} /BlackIs1 false >> /Length ${tileData.length} >>\nstream\n`),
-        tileData,
-        utf8("\nendstream"),
-      ]);
-    }
-    if (tile.compression === 0x80) {
-      return concat([
-        utf8(`<< /Type /XObject /Subtype /Image /Width ${TILE_SIZE} /Height ${TILE_SIZE} /ColorSpace /DeviceGray /BitsPerComponent 1 /Length ${tileData.length} >>\nstream\n`),
-        tileData,
-        utf8("\nendstream"),
-      ]);
-    }
-    throw new ZipPackageError(`Unsupported C4 tile compression flag at tile ${tile.entryNo}.`);
-  }
-
-  function buildCombinedPdfFromParsedDocs(docs, dpi = DEFAULT_DPI) {
-    const cleanDpi = Number.isFinite(dpi) && dpi > 0 ? dpi : DEFAULT_DPI;
-    const objects = new Map();
-    const pageIds = [];
-    let nextObjectId = 3;
-    for (const doc of docs) {
-      const parsed = doc.parsed;
-      const pageWidthPt = (parsed.width / cleanDpi) * 72;
-      const pageHeightPt = (parsed.height / cleanDpi) * 72;
-      const tileWidthPt = (TILE_SIZE / cleanDpi) * 72;
-      const tileHeightPt = (TILE_SIZE / cleanDpi) * 72;
-      const imageRefs = [];
-      for (const tile of [...parsed.tiles].sort((a, b) => a.logicalTile - b.logicalTile)) {
-        const objectId = nextObjectId++;
-        objects.set(objectId, makeImageObject(tile));
-        imageRefs.push({ objectId, logicalTile: tile.logicalTile });
-      }
-      let content = "";
-      for (const ref of imageRefs) {
-        const col = ref.logicalTile % parsed.cols;
-        const row = Math.floor(ref.logicalTile / parsed.cols);
-        const x = col * tileWidthPt;
-        const y = pageHeightPt - (row + 1) * tileHeightPt;
-        content += `q\n${tileWidthPt.toFixed(6)} 0 0 ${tileHeightPt.toFixed(6)} ${x.toFixed(6)} ${y.toFixed(6)} cm\n/Im${ref.objectId} Do\nQ\n`;
-      }
-      const contentBytes = utf8(content);
-      const contentObjectId = nextObjectId++;
-      objects.set(contentObjectId, concat([utf8(`<< /Length ${contentBytes.length} >>\nstream\n`), contentBytes, utf8("endstream")]));
-      const xobjects = imageRefs.map((ref) => `/Im${ref.objectId} ${ref.objectId} 0 R`).join(" ");
-      const pageObjectId = nextObjectId++;
-      objects.set(pageObjectId, utf8(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidthPt.toFixed(6)} ${pageHeightPt.toFixed(6)}] /Resources << /XObject << ${xobjects} >> >> /Contents ${contentObjectId} 0 R >>`));
-      pageIds.push(pageObjectId);
-    }
-    objects.set(2, utf8(`<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`));
-    objects.set(1, utf8("<< /Type /Catalog /Pages 2 0 R >>"));
-    const maxObjectId = Math.max(...objects.keys());
-    const chunks = [utf8("%PDF-1.4\n% C4/MIL package combined PDF generated by GitHub Pages\n")];
-    const offsets = new Array(maxObjectId + 1).fill(0);
-    let length = chunks[0].length;
-    for (let objectId = 1; objectId <= maxObjectId; objectId++) {
-      const body = objects.get(objectId);
-      if (!body) throw new ZipPackageError(`Internal combined PDF build error: missing object ${objectId}.`);
-      offsets[objectId] = length;
-      const prefix = utf8(`${objectId} 0 obj\n`);
-      const suffix = utf8("\nendobj\n");
-      chunks.push(prefix, body, suffix);
-      length += prefix.length + body.length + suffix.length;
-    }
-    const startXref = length;
-    let xref = `xref\n0 ${maxObjectId + 1}\n0000000000 65535 f \n`;
-    for (let objectId = 1; objectId <= maxObjectId; objectId++) xref += `${String(offsets[objectId]).padStart(10, "0")} 00000 n \n`;
-    xref += `trailer\n<< /Size ${maxObjectId + 1} /Root 1 0 R >>\nstartxref\n${startXref}\n%%EOF\n`;
-    chunks.push(utf8(xref));
-    return concat(chunks);
-  }
-
   function downloadBytes(bytes, fileName, mimeType) {
     const blob = new Blob([bytes], { type: mimeType });
     const url = URL.createObjectURL(blob);
@@ -331,16 +238,16 @@
   }
 
   async function convertPackageFiles(fileList) {
+    const exported = getExportedConverter();
     const packages = Array.from(fileList || []).filter(isPackageFile);
     if (!packages.length) return;
-    const { parseC4, buildPdfFromC4 } = getExportedConverter();
     const dpi = getDpi();
     const combine = shouldCombineIntoOnePdf();
     const zipEntries = [];
     const combinedDocs = [];
     const usedPaths = new Set();
     const report = [
-      "C4/MIL EXE/ZIP package conversion report",
+      "C4/MIL/CALS EXE/ZIP package conversion report",
       `Generated: ${new Date().toLocaleString()}`,
       `DPI: ${dpi}`,
       `Packages selected: ${packages.length}`,
@@ -358,12 +265,12 @@
       report.push(`PACKAGE ${file.name}`);
       try {
         const zip = parseZipDirectory(await file.arrayBuffer());
-        const drawings = zip.entries.filter((entry) => !entry.isDirectory && isDrawingPath(entry.name)).sort((a, b) => a.name.localeCompare(b.name));
+        const drawings = zip.entries.filter((entry) => !entry.isDirectory && exported.isSupportedDrawingName(entry.name)).sort((a, b) => a.name.localeCompare(b.name));
         report.push(`  ZIP entries: ${zip.entries.length}`);
-        report.push(`  C4/MIL entries: ${drawings.length}`);
+        report.push(`  Drawing entries: ${drawings.length}`);
         if (!drawings.length) {
           failed++;
-          report.push("  FAIL no .C4 or .MIL files found in this package");
+          report.push("  FAIL no .C4, .MIL, .CAL, or .CALS files found in this package");
           continue;
         }
         for (let i = 0; i < drawings.length; i++) {
@@ -371,13 +278,13 @@
           setStatus(`Converting package ${packageIndex + 1}/${packages.length}, drawing ${i + 1}/${drawings.length}: ${entry.name}`);
           try {
             const drawingBytes = await extractEntry(zip, entry);
-            const parsed = parseC4(drawingBytes.buffer.slice(drawingBytes.byteOffset, drawingBytes.byteOffset + drawingBytes.byteLength));
-            const pdfBytes = buildPdfFromC4(parsed, dpi);
+            const arrayBuffer = drawingBytes.buffer.slice(drawingBytes.byteOffset, drawingBytes.byteOffset + drawingBytes.byteLength);
+            const result = exported.convertDrawingArrayBuffer(arrayBuffer, entry.name, dpi);
             const outPath = makeUniquePath(pdfPath(file.name, entry.name), usedPaths);
-            zipEntries.push({ path: outPath, data: pdfBytes });
-            combinedDocs.push({ path: `${file.name}/${entry.name}`, parsed });
+            zipEntries.push({ path: outPath, data: result.pdfBytes });
+            combinedDocs.push({ path: `${file.name}/${entry.name}`, parsed: result.parsed });
             converted++;
-            report.push(`  OK   ${entry.name} -> ${outPath} (${parsed.width} x ${parsed.height}, ${parsed.tileCount} tiles)`);
+            report.push(`  OK   ${entry.name} -> ${outPath} (${exported.describeParsedDrawing(result.parsed)})`);
           } catch (error) {
             failed++;
             report.push(`  FAIL ${entry.name} -> ${error instanceof Error ? error.message : String(error)}`);
@@ -402,8 +309,8 @@
     if (combine) {
       setStatus("Building combined package PDF...");
       await waitForPaint();
-      const combined = buildCombinedPdfFromParsedDocs(combinedDocs, dpi);
-      downloadBytes(combined, "c4-mil-package-combined.pdf", "application/pdf");
+      const combined = exported.buildCombinedPdfFromParsedDocs(combinedDocs, dpi);
+      downloadBytes(combined, "c4-mil-cals-package-combined.pdf", "application/pdf");
       setStatus(`Package conversion complete. Added ${converted} page(s)${failed ? `, ${failed} failed` : ""}.`);
       setDetails([...report, "", "Combined PDF page order:", ...combinedDocs.map((doc, index) => `${index + 1}. ${doc.path}`)].join("\n"));
       return;
@@ -411,7 +318,7 @@
 
     const fullReport = report.join("\n");
     const zipBytes = makeZip([...zipEntries, { path: "conversion_report.txt", data: utf8(fullReport) }]);
-    downloadBytes(zipBytes, "c4-mil-package-converted-pdfs.zip", "application/zip");
+    downloadBytes(zipBytes, "c4-mil-cals-package-converted-pdfs.zip", "application/zip");
     setStatus(`Package conversion complete. Converted ${converted} file(s)${failed ? `, ${failed} failed` : ""}. ZIP download started.`);
     setDetails(fullReport);
   }
@@ -420,10 +327,7 @@
     const input = document.getElementById("packageInput");
     const button = document.getElementById("packageButton");
     if (!input || !button) return;
-    button.addEventListener("click", () => {
-      input.value = "";
-      input.click();
-    });
+    button.addEventListener("click", () => { input.value = ""; input.click(); });
     input.addEventListener("change", () => convertPackageFiles(input.files));
   }
 

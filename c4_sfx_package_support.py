@@ -1,5 +1,5 @@
 """
-ZIP and WinZip self extracting EXE package support for the C4/MIL dashboard.
+ZIP and WinZip self extracting EXE package support for the C4/MIL/CALS dashboard.
 
 Package EXE files are treated as archives only. They are opened with Python's
 zipfile module, which can read ZIP data that has a self extractor stub prepended.
@@ -34,6 +34,11 @@ def _safe_relative_parts(name: str) -> list[str]:
     return safe
 
 
+def _drawing_label(drawing_extensions: set[str]) -> str:
+    names = sorted(ext.upper().lstrip(".") for ext in drawing_extensions)
+    return "/".join(names)
+
+
 def _package_drawings(package_path: Path, drawing_extensions: set[str]) -> list[zipfile.ZipInfo]:
     try:
         with zipfile.ZipFile(package_path) as archive:
@@ -59,10 +64,10 @@ def _temp_file_from_entry(package_path: Path, entry: zipfile.ZipInfo) -> Path:
         return Path(temp.name)
 
 
-def _decode_package_entry(app, package_path: Path, entry: zipfile.ZipInfo, dpi_fallback: int):
+def _decode_package_entry(app, package_path: Path, entry: zipfile.ZipInfo, dpi_fallback: int, load_entry):
     temp_path = _temp_file_from_entry(package_path, entry)
     try:
-        image, info, dpi = app.decode_c4(temp_path, dpi_fallback)
+        loaded = load_entry(temp_path, dpi_fallback)
     finally:
         try:
             temp_path.unlink()
@@ -73,9 +78,9 @@ def _decode_package_entry(app, package_path: Path, entry: zipfile.ZipInfo, dpi_f
         "ZIP/SFX package entry\n"
         f"Package: {package_path}\n"
         f"Entry: {entry.filename}\n\n"
-        f"{info}"
+        f"{loaded.info}"
     )
-    return app.LoadedFile(package_path, image, dpi, info)
+    return app.LoadedFile(package_path, loaded.image, loaded.dpi, info)
 
 
 def _output_path_for_package_entry(package_path: Path, entry_name: str) -> Path:
@@ -90,6 +95,7 @@ def _output_path_for_package_entry(package_path: Path, entry_name: str) -> Path:
 def install(app, drawing_extensions: set[str]) -> None:
     """Install package handling into the existing dashboard module."""
     app.SUPPORTED_EXTENSIONS.update(PACKAGE_EXTENSIONS)
+    label = _drawing_label(drawing_extensions)
 
     original_load_file = app.load_file
     original_convert_file_to_pdf = app.convert_file_to_pdf
@@ -99,16 +105,16 @@ def install(app, drawing_extensions: set[str]) -> None:
         if _is_package(path):
             drawings = _package_drawings(path, drawing_extensions)
             if not drawings:
-                raise RuntimeError("This package does not contain any .C4 or .MIL drawing files.")
+                raise RuntimeError(f"This package does not contain any {label} drawing files.")
             if len(drawings) > 1:
                 names = "\n".join(f"- {info.filename}" for info in drawings[:25])
                 more = "" if len(drawings) <= 25 else f"\n...and {len(drawings) - 25} more"
                 raise RuntimeError(
-                    "This package contains multiple C4/MIL drawings. "
+                    f"This package contains multiple {label} drawings. "
                     "Use Batch convert folder to convert package contents.\n\n"
                     f"Found {len(drawings)} drawing file(s):\n{names}{more}"
                 )
-            return _decode_package_entry(app, path, drawings[0], dpi_fallback)
+            return _decode_package_entry(app, path, drawings[0], dpi_fallback, original_load_file)
         return original_load_file(path, dpi_fallback)
 
     def convert_file_to_pdf(path: Path, out_path: Path, dpi_fallback: int = app.DEFAULT_DPI) -> tuple[bool, str]:
@@ -117,11 +123,11 @@ def install(app, drawing_extensions: set[str]) -> None:
         try:
             drawings = _package_drawings(path, drawing_extensions)
             if not drawings:
-                return False, "No .C4 or .MIL drawing files found in package."
+                return False, f"No {label} drawing files found in package."
             if len(drawings) != 1:
                 return False, "Package has multiple drawings. Use Batch convert folder for package contents."
-            loaded = _decode_package_entry(app, path, drawings[0], dpi_fallback)
-            app.save_image_as_pdf(loaded.image, out_path, (dpi_fallback, dpi_fallback))
+            loaded = _decode_package_entry(app, path, drawings[0], dpi_fallback, original_load_file)
+            app.save_image_as_pdf(loaded.image, out_path, loaded.dpi)
             return True, str(out_path)
         except Exception as exc:
             return False, str(exc)
@@ -132,10 +138,10 @@ def install(app, drawing_extensions: set[str]) -> None:
         except Exception as exc:
             return 0, 0, 1, [f"FAIL package: {package_path} :: {exc}"]
         if not drawings:
-            return 0, 0, 1, [f"FAIL package: {package_path} :: no .C4 or .MIL drawing files found"]
+            return 0, 0, 1, [f"FAIL package: {package_path} :: no {label} drawing files found"]
 
         converted = skipped = failed = 0
-        logs = [f"PACKAGE: {package_path} ({len(drawings)} C4/MIL file(s))"]
+        logs = [f"PACKAGE: {package_path} ({len(drawings)} {label} file(s))"]
         for entry in drawings:
             out_path = _output_path_for_package_entry(package_path, entry.filename)
             if out_path.exists() and not overwrite:
@@ -167,7 +173,7 @@ def install(app, drawing_extensions: set[str]) -> None:
     def dashboard_init(self) -> None:
         original_dashboard_init(self)
         try:
-            self.status_var.set("Select a C4, MIL, image, ZIP, or self extracting EXE package.")
+            self.status_var.set("Select a C4, MIL, CALS, image, ZIP, or self extracting EXE package.")
         except Exception:
             pass
 
@@ -175,9 +181,9 @@ def install(app, drawing_extensions: set[str]) -> None:
         filetypes = [
             (
                 "Supported files",
-                "*.c4 *.C4 *.mil *.MIL *.exe *.EXE *.zip *.ZIP *.tif *.tiff *.png *.jpg *.jpeg *.bmp *.gif *.webp *.pbm *.pgm *.ppm *.pdf",
+                "*.c4 *.C4 *.mil *.MIL *.cal *.CAL *.cals *.CALS *.exe *.EXE *.zip *.ZIP *.tif *.tiff *.png *.jpg *.jpeg *.bmp *.gif *.webp *.pbm *.pgm *.ppm *.pdf",
             ),
-            ("C4/MIL drawings", "*.c4 *.C4 *.mil *.MIL"),
+            ("C4/MIL/CALS drawings", "*.c4 *.C4 *.mil *.MIL *.cal *.CAL *.cals *.CALS"),
             ("ZIP/SFX packages", "*.exe *.EXE *.zip *.ZIP"),
             ("Images", "*.tif *.tiff *.png *.jpg *.jpeg *.bmp *.gif *.webp *.pbm *.pgm *.ppm"),
             ("PDF", "*.pdf"),

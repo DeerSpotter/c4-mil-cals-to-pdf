@@ -3,6 +3,8 @@ MIL-enabled launcher for the C4 Reader and Converter to PDF dashboard.
 
 This wrapper keeps the original c4_pdf_dashboard.py release code intact and adds
 support for JEDMICS .MIL files that contain the same C4/CCITT4 tiled raster data.
+It also installs ZIP and WinZip self extracting EXE package support for batch
+conversion without executing package EXE files.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from tkinter import filedialog, messagebox
 import traceback
 
 import c4_pdf_dashboard as app
+import c4_sfx_package_support
 
 C4_MIL_EXTENSIONS = {".c4", ".mil"}
 
@@ -129,6 +132,8 @@ app.Dashboard.__init__ = dashboard_init
 app.Dashboard.select_file = select_file
 app.Dashboard.load_selected = load_selected
 app.Dashboard.save_pdf = save_pdf
+
+c4_sfx_package_support.install(app, C4_MIL_EXTENSIONS)
 
 
 if __name__ == "__main__":

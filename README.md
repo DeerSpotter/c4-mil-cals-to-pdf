@@ -4,8 +4,8 @@ Convert legacy C4/JEDMICS engineering raster drawings to PDF.
 
 This project now has two ways to use it:
 
-1. **Online converter** through GitHub Pages for one-file conversion, browser folder/file batch conversion, ZIP download, direct folder save on supported desktop browsers, or combined multi-page PDF output.
-2. **Local Windows Python dashboard** for previewing, saving, and batch converting folders directly beside source files.
+1. **Online converter** through GitHub Pages for one-file conversion, browser folder/file batch conversion, ZIP/SFX package conversion, ZIP download, direct folder save on supported desktop browsers, or combined multi-page PDF output.
+2. **Local Windows Python dashboard** for previewing, saving, batch converting folders directly beside source files, and batch extracting C4/MIL drawings from ZIP or WinZip self extracting EXE delivery packages.
 
 ## Online converter
 
@@ -15,7 +15,7 @@ The online converter is up and running here:
 
 Use this when you need a no-install browser converter for `.C4` or `.MIL` files.
 
-The browser version runs locally in your browser. Selected files are not uploaded to a server. It reads the C4/JEDMICS tile data, builds PDF files in the browser, and lets you open/download a single generated PDF, download a ZIP from batch conversion, save a batch ZIP or combined PDF back into a selected folder when the browser supports folder write permission, or combine batch output into one multi-page PDF.
+The browser version runs locally in your browser. Selected files are not uploaded to a server. It reads the C4/JEDMICS tile data, builds PDF files in the browser, and lets you open/download a single generated PDF, download a ZIP from batch conversion, save a batch ZIP or combined PDF back into a selected folder when the browser supports folder write permission, combine batch output into one multi-page PDF, or read `.C4` and `.MIL` drawings from ZIP and WinZip self extracting `.EXE` delivery packages without executing the EXE.
 
 Online converter features:
 
@@ -26,18 +26,23 @@ Online converter features:
 - Download the generated PDF.
 - Select a folder and scan subfolders for `.C4` and `.MIL` files when the browser supports recursive folder selection.
 - Select multiple `.C4` and `.MIL` files manually when folder selection is not available, such as on some iOS browsers.
+- Select one or more `.ZIP` or WinZip self extracting `.EXE` packages and convert embedded `.C4` / `.MIL` files.
 - Download browser batch converted PDFs as one ZIP file with a conversion report.
 - Use **Choose folder and save output there** on supported desktop browsers to write `c4-mil-converted-pdfs.zip` directly into the selected source folder.
 - Check **Combine batch output into one multi-page PDF** to download one combined PDF instead of a ZIP, or to save `c4-mil-combined.pdf` into the selected folder when using the direct folder save button.
 - No Python install required.
 
+Browser package note: `.EXE` support is for old WinZip self extracting archive delivery packages. The browser reads the file as bytes, locates the embedded ZIP directory, inflates `.C4` / `.MIL` entries in memory, and never executes the EXE. Deflated package entries require a browser with `DecompressionStream("deflate-raw")` support, normally current desktop Chrome, Edge, or Firefox.
+
 Browser folder batch note: normal web file pickers cannot silently write generated PDFs back into your original local folders. The direct save button uses browser folder write permission when available, usually in desktop Chromium based browsers. iOS Safari generally does not expose this direct folder write workflow, so use normal download or the Python dashboard when you need guaranteed local folder output.
 
 ## Local Python dashboard
 
-The local dashboard is the full desktop version. Use this when you want folder batch conversion, recursive subfolder scanning, or a Windows desktop preview workflow.
+The local dashboard is the full desktop version. Use this when you want folder batch conversion, recursive subfolder scanning, package extraction, or a Windows desktop preview workflow.
 
 The launcher uses `c4_pdf_dashboard_mil.py`, which keeps the original `c4_pdf_dashboard.py` release code intact and adds `.MIL` support for JEDMICS CCITT4 files saved with a MIL extension.
+
+The same launcher also supports ZIP and WinZip self extracting `.EXE` packages during batch conversion. Package EXEs are opened with Python's ZIP reader only. They are not executed. When a batch finds a package, output PDFs are written beside the package under a folder named `<package_name>_pdfs` while preserving the internal package folder structure.
 
 ## Documentation
 
@@ -56,6 +61,7 @@ For AMCOM EDIS delivery package context, `INDEX.DLF` metadata notes, and why `.C
 - Save the selected drawing as a PDF.
 - Batch convert a whole directory tree.
 - Recursive batch mode searches all subfolders and writes each PDF beside the source file.
+- Batch mode can expand ZIP and WinZip self extracting EXE packages and convert embedded C4/MIL drawings.
 - Existing PDFs are skipped by default unless overwrite is enabled.
 
 ## Supported input formats
@@ -71,6 +77,11 @@ Direct conversion:
 - `.gif`
 - `.webp`
 - `.pbm` / `.pgm` / `.ppm`
+
+Batch package extraction:
+
+- `.zip` packages containing `.C4` or `.MIL` files
+- WinZip self extracting `.exe` packages containing `.C4` or `.MIL` files
 
 PDF preview is optional if `pymupdf` is installed. PDF files are not batch converted because they are already PDFs.
 
@@ -104,7 +115,8 @@ run_c4_pdf_dashboard.bat
 2. Click **Batch convert folder...**.
 3. Pick the top folder.
 4. The program searches all subfolders for supported files.
-5. It writes each output PDF in the same folder as the source file.
+5. It writes each normal C4/MIL output PDF in the same folder as the source file.
+6. If it finds a ZIP or self extracting EXE package, it writes package outputs under `<package_name>_pdfs` beside that package.
 
 To replace existing PDFs, check **Overwrite PDFs in batch** before starting batch conversion.
 

@@ -38,6 +38,10 @@
         <button id="filesButton" type="button">Choose C4/MIL files</button>
       </div>
 
+      <div class="row batch-row">
+        <button id="folderSaveButton" type="button">Choose folder and save output there</button>
+      </div>
+
       <label class="checkbox-label" for="combinePdfCheckbox">
         <input id="combinePdfCheckbox" type="checkbox">
         Combine batch output into one multi-page PDF
@@ -49,6 +53,13 @@
         to web pages, so use <strong>Choose C4/MIL files</strong> on iPhone or iPad and
         select the files you want to convert from the Files app. Files are processed in
         your browser and are not uploaded.
+      </p>
+
+      <p class="batch-help">
+        <strong>Choose folder and save output there</strong> uses browser folder write permission
+        when available. On supported desktop browsers, it scans the selected folder and writes
+        either <code>c4-mil-converted-pdfs.zip</code> or, when the combine checkbox is checked,
+        <code>c4-mil-combined.pdf</code> back into that same selected folder.
       </p>
 
       <label class="dpi-label" for="dpiInput">
@@ -64,8 +75,9 @@
         <p>
           The browser version can convert one file for preview/download, batch convert a
           selected folder tree into one ZIP download, batch convert manually selected files,
+          save output directly into a selected folder on supported desktop browsers,
           or combine batch output into one multi-page PDF. The desktop Python release remains
-          the full tool for writing converted PDFs beside source files in local folders.
+          the full tool for writing each converted PDF beside each source file in local folders.
         </p>
         <p>
           The generated PDF embeds the original CCITT Group 4 tiles directly, so the page
@@ -87,5 +99,6 @@
   <script src="app.js"></script>
   <script src="mil-support.js"></script>
   <script src="batch-folder.js"></script>
+  <script src="save-to-source-folder.js"></script>
 </body>
 </html>

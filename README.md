@@ -1,4 +1,4 @@
-# C4 Reader and Converter to PDF
+# C4/MIL/CALS to PDF
 
 Convert legacy C4/JEDMICS, MIL, and CALS engineering raster drawings to PDF.
 
@@ -11,7 +11,7 @@ This project now has two ways to use it:
 
 The online converter is up and running here:
 
-[https://deerspotter.github.io/C4-Reader-and-Converter-to-pdf/](https://deerspotter.github.io/C4-Reader-and-Converter-to-pdf/)
+[https://deerspotter.github.io/c4-mil-cals-to-pdf/](https://deerspotter.github.io/c4-mil-cals-to-pdf/)
 
 Use this when you need a no-install browser converter for `.C4`, `.MIL`, `.CAL`, or `.CALS` files.
 
@@ -138,15 +138,3 @@ This tool decodes the common JEDMICS/C4 layout used by tiled black and white eng
 - CCITT Group 4 compression
 - Little endian tile index sizes
 - Drawing scale defaults to 200 DPI
-
-## CALS decoding notes
-
-This tool also supports the common CALS Type 1 raster layout used by `.CAL` and `.CALS` engineering drawings.
-
-- 2048 byte ASCII header made of 128 byte records
-- `rtype: 1`
-- `rpelcnt` supplies width and height
-- `rdensty` supplies the native drawing DPI when present
-- Image data is one CCITT Group 4 raster strip after the header
-
-The DPI value can be changed in the dashboard before saving or batch converting.
